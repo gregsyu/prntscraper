@@ -1,0 +1,21 @@
+[project]
+name = "prnt"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "gregsyu",email = "greg3@tutamail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "beautifulsoup4 (>=4.14.3,<5.0.0)",
+    "rich (>=14.3.3,<15.0.0)",
+    "requests (>=2.32.5,<3.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "prnt", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
