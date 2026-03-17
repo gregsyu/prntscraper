@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from random import randrange, choices
 from string import ascii_lowercase
@@ -7,13 +8,45 @@ from typing import Dict
 
 import requests
 from bs4 import BeautifulSoup
-from rich import print
 from PIL import Image
+from rich.logging import RichHandler
 import torch
 import clip
 import typer
 
 app = typer.Typer()
+
+def setup_logging(debug: bool = False) -> logging.Logger:
+    level = logging.DEBUG if debug else logging.INFO
+
+    logging.getLogger().handlers.clear()
+    logging.basicConfig(
+        level=level,
+        format="%(message)s",
+        datefmt="[%X]",
+        handlers=[
+            RichHandler(
+                rich_tracebacks=True,
+                markup=True,
+                show_path=False,
+                show_time=True,
+                show_level=True,
+            )
+        ],
+    )
+    logger = logging.getLogger("prntscraper")
+    logger.setLevel(level)
+
+    # Silencing
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("requests").setLevel(logging.WARNING)
+    logging.getLogger("http.client").setLevel(logging.WARNING)
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+    logging.getLogger("torch").setLevel(logging.WARNING)
+
+    return logger
+
+logger: logging.Logger = logging.getLogger("prntscraper")
 
 BASE_URL = "https://prnt.sc"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -26,12 +59,11 @@ PREPROCESS = None
 TEXT_TOKENS = None
 
 
-def load_model(debug: bool = False):
+def load_model(debug: bool = False) -> None:
     global MODEL, PREPROCESS, TEXT_TOKENS
 
     if MODEL is None:
-        if debug:
-            print("[cyan]Loading CLIP model...[/cyan]")
+        logger.debug("[cyan]Loading CLIP model...[/cyan]")
         MODEL, PREPROCESS = clip.load("ViT-B/32", device=DEVICE)
         TEXT_TOKENS = clip.tokenize(LABELS).to(DEVICE)
 
@@ -91,6 +123,9 @@ def download(
     Download screenshots from `prnt.sc`.
     Optionally filter images by classification.
     """
+    global logger
+    logger = setup_logging(debug)
+
     output_dir = Path(directory)
     output_dir.mkdir(exist_ok=True)
 
@@ -111,8 +146,7 @@ def download(
             img = soup.find("img", {"id": "screenshot-image"})
 
             if not img:
-                if debug:
-                    print(f"[yellow]No screenshot:[/yellow] `{code}`")
+                logger.warning(f"[yellow]No screenshot:[/yellow] `{code}`")
                 continue
 
             img_url = img["src"]
@@ -128,20 +162,19 @@ def download(
             with open(file_path, "wb") as f:
                 f.write(response.content)
             if not is_image_valid(file_path):
-                if debug:
-                    print("[red]Invalid file removed:[/red]", code)
+                logger.error(f"[red]Invalid file removed:[/red] `{code}`")
                 file_path.unlink()
             if filter:
                 result = classify_image(file_path)
                 if result.get(filter, 0) < SCREENSHOT_THRESHOLD:
-                    if debug:
-                        print("[yellow]Filtered out:[/yellow]", file_path)
-            if debug:
-                print("[green]Downloaded:[/green]", code)
+                    logger.warning(f"[yellow]Filtered out:[/yellow] `{file_path}`")
+                    file_path.unlink()
+            logger.info(f"[green]Downloaded:[/green] `{code}`")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[red]Network error on {code}:[/red] `{e}`")
         except Exception as e:
-            if debug:
-                print("[red]Error:[/red]", code, e)
-        # webbrowser.open_new_tab(url)
+            logger.exception(f"[red]Unexpected error:[/red] `{code}`: `{e}`")
+        # NOTE: webbrowser.open_new_tab(url)
 
 
 @app.command()
@@ -157,26 +190,24 @@ def filter(
     """
     Filter images in a directory using openai's CLIP classification.
     """
-    load_model(debug=debug)
-
+    global logger
+    logger = setup_logging(debug)
+    load_model()
     path = Path(directory)
 
     for file in path.glob("*"):
         if not is_image_valid(file):
-            if debug:
-                print("[red]Removing invalid image:[/red]", file)
+            logger.error(f"[red]Removing invalid image:[/red] `{file}`")
             file.unlink()
             continue
 
         result = classify_image(file)
 
         if result[filter_image] < SCREENSHOT_THRESHOLD:
-            if debug:
-                print("[yellow]Removing image:[/yellow]", file)
+            logger.warning(f"[yellow]Removing image:[/yellow] `{file}`")
             file.unlink()
         else:
-            if debug:
-                print("[green]Keeping image:[/green]", file)
+            logger.info(f"[green]Keeping image:[/green] `{file}`")
 
 
 if __name__ == "__main__":
