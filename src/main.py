@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 from rich.logging import RichHandler
+from rich.progress import track
 import torch
 import clip
 import typer
@@ -132,7 +133,7 @@ def download(
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    for _ in range(max_downloads):
+    for _ in track(range(max_downloads), description="Downloading..."):
         code = gen_code()
         url = f"{BASE_URL}/{code}"
 
@@ -192,10 +193,13 @@ def filter(
     """
     global logger
     logger = setup_logging(debug)
-    load_model()
-    path = Path(directory)
 
-    for file in path.glob("*"):
+    load_model()
+
+    path = Path(directory)
+    files = sorted(path.glob("*"))
+
+    for file in track(files, description="Filtering..."):
         if not is_image_valid(file):
             logger.error(f"[red]Removing invalid image:[/red] `{file}`")
             file.unlink()
