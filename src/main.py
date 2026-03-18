@@ -17,6 +17,16 @@ import typer
 
 app = typer.Typer()
 
+BASE_URL = "https://prnt.sc"
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+LABELS = ["screenshot", "photograph", "painting"]
+SCREENSHOT_THRESHOLD = 0.8
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+MODEL = None
+PREPROCESS = None
+TEXT_TOKENS = None
+
 def setup_logging(debug: bool = False) -> logging.Logger:
     level = logging.DEBUG if debug else logging.INFO
 
@@ -48,16 +58,6 @@ def setup_logging(debug: bool = False) -> logging.Logger:
     return logger
 
 logger: logging.Logger = logging.getLogger("prntscraper")
-
-BASE_URL = "https://prnt.sc"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
-LABELS = ["screenshot", "photograph", "painting"]
-SCREENSHOT_THRESHOLD = 0.8
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-MODEL = None
-PREPROCESS = None
-TEXT_TOKENS = None
 
 
 def load_model(debug: bool = False) -> None:
