@@ -5,6 +5,8 @@ from pathlib import Path
 from random import randrange, choices
 from string import ascii_lowercase
 from typing import Dict
+import shutil
+import subprocess
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,6 +28,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL = None
 PREPROCESS = None
 TEXT_TOKENS = None
+
 
 def setup_logging(debug: bool = False) -> logging.Logger:
     level = logging.DEBUG if debug else logging.INFO
@@ -57,7 +60,60 @@ def setup_logging(debug: bool = False) -> logging.Logger:
 
     return logger
 
+
 logger: logging.Logger = logging.getLogger("prntscraper")
+
+
+def aria2c(
+    urls_and_options: list[tuple[str, dict]], output_dir: Path, debug: bool = False
+) -> bool:
+    aria2c_path = shutil.which("aria2c") or shutil.which("aria2c.exe")
+    if not aria2c_path:
+        logger.error("[red]aria2c not installed or not in PATH[/red]")
+        return False
+
+    input_lines = list()
+    for url, opts in urls_and_options:
+        input_lines.append(url)
+        for k, v in opts.items():
+            input_lines.append(f"  {k}={v}")
+        input_lines.append("")
+    input_text = "\n".join(input_lines)
+
+    cmd = [
+        aria2c_path,
+        "--input-file=-",
+        "--dir",
+        str(output_dir),
+        "-x",
+        "16",
+        "-s",
+        "16",
+        "-j",
+        "8",
+        "-k",
+        "1M",
+        "--continue=true",
+        "--allow-overwrite=true",
+        "--auto-file-renaming=false",
+        "--human-readable=true",
+        "--summary-interval=1",  # if not debug else
+    ]
+
+    try:
+        result = subprocess.run(
+            cmd, input=input_text, check=False, text=True
+        )
+        if result.returncode != 0:
+            logger.error(f"[red]aria2c exited with code {result.returncode}[/red]")
+            logger.error(result.stderr)
+            return False
+        logger.info("[green]aria2c completed successfully[/green]")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"[red]aria2c failed (code {e.returncode})")
+        logger.error(e.stderr)
+        return False
 
 
 def load_model(debug: bool = False) -> None:
@@ -127,22 +183,21 @@ def download(
     global logger
     logger = setup_logging(debug)
 
-    output_dir = Path(directory)
+    output_dir = Path(directory).resolve()
     output_dir.mkdir(exist_ok=True)
 
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    for _ in track(range(max_downloads), description="Downloading..."):
+    downloads: list[tuple[str, dict]] = list()
+
+    for _ in range(max_downloads):
         code = gen_code()
         url = f"{BASE_URL}/{code}"
 
-        # for item in gen_urls(n):
-        # code = item["code"]
-        # url = item["url"]
-
         try:
             page = session.get(url, timeout=10)
+            page.raise_for_status()
             soup = BeautifulSoup(page.text, "html.parser")
             img = soup.find("img", {"id": "screenshot-image"})
 
@@ -151,30 +206,56 @@ def download(
                 continue
 
             img_url = img["src"]
-            response = session.get(img_url, timeout=10)
 
-            # if "image" not in response.headers.get("Content-Type", ""):
-            # if debug:
-            # print(f"[yellow]Invalid image:[/yellow] {code}")
-            # continue
+            # checks if image is valid
+            try:
+                head = session.head(img_url, timeout=6, allow_redirects=True)
+                match head.status_code:
+                    case 200:
+                        pass
+                    case 404:
+                        logger.debug(f"Image 404 not found: `{code}` -> {img_url}")
+                        continue
+                    case _:
+                        logger.debug(f"Unexpected status {head.status_code} for image: {code}")
+                        continue
+            except requests.RequestException as e:
+                logger.debug(f"HEAD check failed for `{code}`: {e}")
+                continue
 
-            file_path = output_dir / f"{code}.png"
+            options = {
+                "out": f"{code}.png",
+            }
 
-            with open(file_path, "wb") as f:
-                f.write(response.content)
-            if not is_image_valid(file_path):
-                logger.error(f"[red]Invalid file removed:[/red] `{code}`")
-                file_path.unlink()
-            if filter:
-                result = classify_image(file_path)
-                if result.get(filter, 0) < SCREENSHOT_THRESHOLD:
-                    logger.warning(f"[yellow]Filtered out:[/yellow] `{file_path}`")
-                    file_path.unlink()
-            logger.info(f"[green]Downloaded:[/green] `{code}`")
+            downloads.append((img_url, options))
         except requests.exceptions.RequestException as e:
             logger.error(f"[red]Network error on {code}:[/red] `{e}`")
+            return
         except Exception as e:
             logger.exception(f"[red]Unexpected error:[/red] `{code}`: `{e}`")
+            return
+    if not downloads:
+        logger.warning("[yellow]No valid images found.[/yellow]")
+        return
+
+    success = aria2c(urls_and_options=downloads, output_dir=output_dir, debug=debug)
+
+    if not success:  # fallback
+        logger.warning(
+            "[yellow]aria2c failed -> consider installing it or using slow mode[/yellow]"
+        )
+        return
+
+    for file in output_dir.glob("*"):
+        if not is_image_valid(file):
+            logger.error(f"[red]Invalid file removed:[/red] {file.name}")
+            file.unlink()
+            continue
+        if filter:
+            result = classify_image(file)
+            if result.get(filter, 0) < SCREENSHOT_THRESHOLD:
+                logger.warning(f"[yellow]Filtered out:[/yellow] `{file}`")
+                file.unlink()
         # NOTE: webbrowser.open_new_tab(url)
 
 
