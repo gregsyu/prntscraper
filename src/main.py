@@ -174,6 +174,7 @@ def download(
         "-f",
         help="Keep only images classified as this label (screenshot, photograph, painting.)",
     ),
+    max_attempts_multiplier: int = typer.Option(5, "--max-attempts-multiplier", help="How many attempts per desired image"),
     debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
 ) -> None:
     """
@@ -190,8 +191,12 @@ def download(
     session.headers.update(HEADERS)
 
     downloads: list[tuple[str, dict]] = list()
+    max_attempts = max_downloads * max_attempts_multiplier
+    successful = 0
+    attempts = 0
 
-    for _ in range(max_downloads):
+    while successful < max_downloads and attempts < max_attempts:
+        attempts += 1
         code = gen_code()
         url = f"{BASE_URL}/{code}"
 
@@ -226,8 +231,8 @@ def download(
             options = {
                 "out": f"{code}.png",
             }
-
             downloads.append((img_url, options))
+            successful += 1
         except requests.exceptions.RequestException as e:
             logger.error(f"[red]Network error on {code}:[/red] `{e}`")
             return
@@ -248,7 +253,7 @@ def download(
 
     for file in output_dir.glob("*"):
         if not is_image_valid(file):
-            logger.error(f"[red]Invalid file removed:[/red] {file.name}")
+            logger.error(f"[red]Removing invalid file:[/red] {file.name}")
             file.unlink()
             continue
         if filter:
