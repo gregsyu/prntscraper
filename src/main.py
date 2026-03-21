@@ -168,13 +168,9 @@ def download(
     directory: str = typer.Option(
         "sss", "--directory", "-d", help="Directory to store images."
     ),
-    filter: str = typer.Option(
-        None,
-        "--filter",
-        "-f",
-        help="Keep only images classified as this label (screenshot, photograph, painting.)",
+    max_attempts_multiplier: int = typer.Option(
+        5, "--max-attempts-multiplier", help="How many attempts per desired image"
     ),
-    max_attempts_multiplier: int = typer.Option(5, "--max-attempts-multiplier", help="How many attempts per desired image"),
     debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
 ) -> None:
     """
@@ -256,12 +252,7 @@ def download(
             logger.error(f"[red]Removing invalid file:[/red] {file.name}")
             file.unlink()
             continue
-        if filter:
-            result = classify_image(file)
-            if result.get(filter, 0) < SCREENSHOT_THRESHOLD:
-                logger.warning(f"[yellow]Filtered out:[/yellow] `{file}`")
-                file.unlink()
-        # NOTE: webbrowser.open_new_tab(url)
+    # NOTE: webbrowser.open_new_tab(url)
 
 
 @app.command()
