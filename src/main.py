@@ -246,12 +246,6 @@ def download(
             "[yellow]aria2c failed -> consider installing it or using slow mode[/yellow]"
         )
         return
-
-    for file in output_dir.glob("*"):
-        if not is_image_valid(file):
-            logger.error(f"[red]Removing invalid file:[/red] {file.name}")
-            file.unlink()
-            continue
     # NOTE: webbrowser.open_new_tab(url)
 
 
@@ -274,14 +268,9 @@ def filter(
     load_model()
 
     path = Path(directory)
-    files = sorted(path.glob("*"))
+    files = sorted(path.glob("*.png"))
 
     for file in track(files, description="Filtering..."):
-        if not is_image_valid(file):
-            logger.error(f"[red]Removing invalid image:[/red] `{file}`")
-            file.unlink()
-            continue
-
         result = classify_image(file)
 
         if result[filter_image] < SCREENSHOT_THRESHOLD:
@@ -289,6 +278,29 @@ def filter(
             file.unlink()
         else:
             logger.info(f"[green]Keeping image:[/green] `{file}`")
+
+
+@app.command()
+def cleanup(
+    directory: str = typer.Option(
+        "sss", "--directory", "-d", help="Directory containing images."
+    ),
+    debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
+):
+    global logger
+    logger = setup_logging(debug=debug)
+
+    output_dir = Path(directory).resolve()
+    files = sorted(output_dir.glob("*"))
+    invalid_files = 0
+
+    for file in track(files, description="Checking..."):
+        if not is_image_valid(file):
+            logger.warning(f"[yellow]Removing invalid file:[/yellow] {file.name}")
+            file.unlink()
+            invalid_files += 1
+
+    logger.info(f"[green]Removed {invalid_files}/{files.__len__()}[/green]")
 
 
 if __name__ == "__main__":
