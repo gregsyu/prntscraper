@@ -97,13 +97,12 @@ def aria2c(
         "--allow-overwrite=true",
         "--auto-file-renaming=false",
         "--human-readable=true",
-        "--summary-interval=1",  # if not debug else
+        "--summary-interval=0",  # if not debug else
+        "--download-result=hide",
     ]
 
     try:
-        result = subprocess.run(
-            cmd, input=input_text, check=False, text=True
-        )
+        result = subprocess.run(cmd, input=input_text, check=False, text=True)
         if result.returncode != 0:
             logger.error(f"[red]aria2c exited with code {result.returncode}[/red]")
             logger.error(result.stderr)
@@ -169,7 +168,10 @@ def download(
         "sss", "--directory", "-d", help="Directory to store images."
     ),
     max_attempts_multiplier: int = typer.Option(
-        5, "--max-attempts-multiplier", help="How many attempts per desired image"
+        5, "--max-attempts-multiplier", help="How many attempts per desired image."
+    ),
+    ignore_invalid_images: bool = typer.Option(
+        False, "--ignore-invalid-images", "-i", help="Ignores invalid images from downloading."
     ),
     debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
 ) -> None:
@@ -208,21 +210,21 @@ def download(
 
             img_url = img["src"]
 
-            # checks if image is valid
-            try:
-                head = session.head(img_url, timeout=6, allow_redirects=True)
-                match head.status_code:
-                    case 200:
-                        pass
-                    case 404:
-                        logger.debug(f"Image 404 not found: `{code}` -> {img_url}")
-                        continue
-                    case _:
-                        logger.debug(f"Unexpected status {head.status_code} for image: {code}")
-                        continue
-            except requests.RequestException as e:
-                logger.debug(f"HEAD check failed for `{code}`: {e}")
-                continue
+            if ignore_invalid_images:
+                try:
+                    head = session.head(img_url, timeout=6, allow_redirects=True)
+                    match head.status_code:
+                        case 200:
+                            pass
+                        case 404:
+                            logger.debug(f"Image 404 not found: `{code}` -> {img_url}")
+                            continue
+                        case _:
+                            logger.debug(f"Unexpected status {head.status_code} for image: {code}")
+                            continue
+                except requests.RequestException as e:
+                    logger.debug(f"HEAD check failed for `{code}`: {e}")
+                    continue
 
             options = {
                 "out": f"{code}.png",
