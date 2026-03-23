@@ -168,7 +168,7 @@ def download(
         "sss", "--directory", "-d", help="Directory to store images."
     ),
     max_attempts_multiplier: int = typer.Option(
-        5, "--max-attempts-multiplier", help="How many attempts per desired image."
+        5, "--max-attempts-multiplier", "-a", help="How many attempts per desired image."
     ),
     ignore_invalid_images: bool = typer.Option(
         False, "--ignore-invalid-images", "-i", help="Ignores invalid images from downloading."
