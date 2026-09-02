@@ -87,7 +87,7 @@ cleanup:
 ```
 
 ## How it works (brief)
-1. Generates random prnt.sc codes (u?0???)
+1. Generates random 12-character, URL-safe prnt.sc codes
 2. Fetches page -> extracts image URL
 3. (optional) HEAD check to skip 404s
 4. Collects until enough valid images found

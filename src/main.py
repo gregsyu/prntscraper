@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from random import randrange, choices
-from string import ascii_lowercase
+from string import ascii_lowercase, digits
 from typing import Dict
 import shutil
 import subprocess
@@ -125,14 +125,9 @@ def load_model(debug: bool = False) -> None:
 
 
 def gen_code() -> str:
-    alphabet = ascii_lowercase
-    result = (
-        "u"
-        + choices(alphabet, k=1)[0]
-        + str(randrange(10))
-        + "".join(choices(alphabet, k=3))
-    )
-    return result
+    chars = ascii_lowercase + digits
+    length = choices(list(range(6, 9)))[0]
+    return "".join(choices(chars, k=length))
 
 
 def is_image_valid(path: Path) -> bool:
