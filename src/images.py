@@ -29,9 +29,14 @@ def load_model() -> None:
 
 
 def gen_code() -> str:
-    chars = ascii_lowercase + digits
-    length = choices(list(range(6, 9)))[0]
-    return "".join(choices(chars, k=length))
+    first_chars = ascii_lowercase + digits[1:]
+    remaining_chars = ascii_lowercase + digits
+    return "".join(
+        [
+            choices(first_chars, k=1)[0],
+            *choices(remaining_chars, k=5),
+        ]
+    )
 
 
 def is_image_valid(path: Path) -> bool:
