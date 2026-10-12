@@ -1,21 +1,21 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from random import randrange, choices
-from string import ascii_lowercase, digits
-from typing import Dict
 import shutil
 import subprocess
+from pathlib import Path
+from random import choices
+from string import ascii_lowercase, digits
+from typing import Annotated
 
+import clip
 import requests
+import torch
+import typer
 from bs4 import BeautifulSoup
 from PIL import Image
 from rich.logging import RichHandler
 from rich.progress import track
-import torch
-import clip
-import typer
 
 app = typer.Typer()
 
@@ -25,9 +25,9 @@ LABELS = ["screenshot", "photograph", "painting"]
 SCREENSHOT_THRESHOLD = 0.8
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-MODEL = None
-PREPROCESS = None
-TEXT_TOKENS = None
+model = None
+preprocess = None
+text_tokens = None
 
 
 def setup_logging(debug: bool = False) -> logging.Logger:
@@ -65,14 +65,15 @@ logger: logging.Logger = logging.getLogger("prntscraper")
 
 
 def aria2c(
-    urls_and_options: list[tuple[str, dict]], output_dir: Path, debug: bool = False
+    urls_and_options: list[tuple[str, dict[str, str]]],
+    output_dir: Path,
 ) -> bool:
     aria2c_path = shutil.which("aria2c") or shutil.which("aria2c.exe")
     if not aria2c_path:
         logger.error("[red]aria2c not installed or not in PATH[/red]")
         return False
 
-    input_lines = list()
+    input_lines: list[str] = []
     for url, opts in urls_and_options:
         input_lines.append(url)
         for k, v in opts.items():
@@ -115,13 +116,13 @@ def aria2c(
         return False
 
 
-def load_model(debug: bool = False) -> None:
-    global MODEL, PREPROCESS, TEXT_TOKENS
+def load_model() -> None:
+    global model, preprocess, text_tokens
 
-    if MODEL is None:
+    if model is None:
         logger.debug("[cyan]Loading CLIP model...[/cyan]")
-        MODEL, PREPROCESS = clip.load("ViT-B/32", device=DEVICE)
-        TEXT_TOKENS = clip.tokenize(LABELS).to(DEVICE)
+        model, preprocess = clip.load("ViT-B/32", device=DEVICE)
+        text_tokens = clip.tokenize(LABELS).to(DEVICE)
 
 
 def gen_code() -> str:
@@ -139,13 +140,16 @@ def is_image_valid(path: Path) -> bool:
         return False
 
 
-def classify_image(path: Path) -> Dict[str, float]:
+def classify_image(path: Path) -> dict[str, float]:
     load_model()
+    assert model is not None
+    assert preprocess is not None
+    assert text_tokens is not None
 
-    image = PREPROCESS(Image.open(path)).unsqueeze(0).to(DEVICE)
+    image = preprocess(Image.open(path)).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
-        logits_per_image, _ = MODEL(image, TEXT_TOKENS)
+        logits_per_image, _ = model(image, text_tokens)
         probs = logits_per_image.softmax(dim=-1)
 
     return dict(zip(LABELS, probs[0].cpu().numpy()))
@@ -153,22 +157,36 @@ def classify_image(path: Path) -> Dict[str, float]:
 
 @app.command()
 def download(
-    max_downloads: int = typer.Option(
-        100,
-        "--max-downloads",
-        "-m",
-        help="Number of screenshots to attempt downloading.",
-    ),
-    directory: str = typer.Option(
-        "sss", "--directory", "-d", help="Directory to store images."
-    ),
-    max_attempts_multiplier: int = typer.Option(
-        5, "--max-attempts-multiplier", "-a", help="How many attempts per desired image."
-    ),
-    ignore_invalid_images: bool = typer.Option(
-        False, "--ignore-invalid-images", "-i", help="Ignores invalid images from downloading."
-    ),
-    debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
+    max_downloads: Annotated[
+        int,
+        typer.Option(
+            "--max-downloads",
+            "-m",
+            help="Number of screenshots to attempt downloading.",
+        ),
+    ] = 100,
+    directory: Annotated[
+        str, typer.Option("--directory", "-d", help="Directory to store images.")
+    ] = "sss",
+    max_attempts_multiplier: Annotated[
+        int,
+        typer.Option(
+            "--max-attempts-multiplier",
+            "-a",
+            help="How many attempts per desired image.",
+        ),
+    ] = 5,
+    ignore_invalid_images: Annotated[
+        bool,
+        typer.Option(
+            "--ignore-invalid-images",
+            "-i",
+            help="Ignores invalid images from downloading.",
+        ),
+    ] = False,
+    debug: Annotated[
+        bool, typer.Option("--debug", "-v", help="Enable debug output.")
+    ] = False,
 ) -> None:
     """
     Download screenshots from `prnt.sc`.
@@ -183,7 +201,7 @@ def download(
     session = requests.Session()
     session.headers.update(HEADERS)
 
-    downloads: list[tuple[str, dict]] = list()
+    downloads: list[tuple[str, dict]] = []
     max_attempts = max_downloads * max_attempts_multiplier
     successful = 0
     attempts = 0
@@ -215,7 +233,9 @@ def download(
                             logger.debug(f"Image 404 not found: `{code}` -> {img_url}")
                             continue
                         case _:
-                            logger.debug(f"Unexpected status {head.status_code} for image: {code}")
+                            logger.debug(
+                                f"Unexpected status {head.status_code} for image: {code}"
+                            )
                             continue
                 except requests.RequestException as e:
                     logger.debug(f"HEAD check failed for `{code}`: {e}")
@@ -236,25 +256,26 @@ def download(
         logger.warning("[yellow]No valid images found.[/yellow]")
         return
 
-    success = aria2c(urls_and_options=downloads, output_dir=output_dir, debug=debug)
-
+    success = aria2c(urls_and_options=downloads, output_dir=output_dir)
+    msg = "[yellow]aria2c failed -> consider installing it or using slow mode[/yellow]"
     if not success:  # fallback
-        logger.warning(
-            "[yellow]aria2c failed -> consider installing it or using slow mode[/yellow]"
-        )
+        logger.warning(msg)
         return
     # NOTE: webbrowser.open_new_tab(url)
 
 
 @app.command()
 def filter(
-    filter_image: str = typer.Option(
-        LABELS[1], "--filter-image", "-f", help="Image type to keep."
-    ),
-    directory: str = typer.Option(
-        "sss", "--directory", "-d", help="Directory containing image to filter."
-    ),
-    debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
+    filter_image: Annotated[
+        str, typer.Option("--filter-image", "-f", help="Image type to keep.")
+    ] = LABELS[1],
+    directory: Annotated[
+        str,
+        typer.Option("--directory", "-d", help="Directory containing image to filter."),
+    ] = "sss",
+    debug: Annotated[
+        bool, typer.Option("--debug", "-v", help="Enable debug output.")
+    ] = False,
 ) -> None:
     """
     Filter images in a directory using openai's CLIP classification.
@@ -279,10 +300,12 @@ def filter(
 
 @app.command()
 def cleanup(
-    directory: str = typer.Option(
-        "sss", "--directory", "-d", help="Directory containing images."
-    ),
-    debug: bool = typer.Option(False, "--debug", "-v", help="Enable debug output."),
+    directory: Annotated[
+        str, typer.Option("--directory", "-d", help="Directory containing images.")
+    ] = "sss",
+    debug: Annotated[
+        bool, typer.Option("--debug", "-v", help="Enable debug output.")
+    ] = False,
 ):
     global logger
     logger = setup_logging(debug=debug)
