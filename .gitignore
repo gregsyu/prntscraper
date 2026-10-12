@@ -1,4 +1,5 @@
 .DS_Store
 todo.md
 sss/
+__pycache__/
 *_cache
